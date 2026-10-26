@@ -1,0 +1,225 @@
+import { draftCourse } from "../agent/course-drafter.ts";
+import { piEngineForSpec } from "../agent/models.ts";
+import type { Course, CourseDraft, CourseIntake, Lesson, LessonStatus } from "../core/contracts/course.ts";
+import { continueLessonId, courseProgress, lessonIdFor, lessonStatus } from "../core/courses.ts";
+import { resolveConversationSpec } from "../core/settings-resolution.ts";
+import { modelsNotConfigured, providerKeyMissing } from "../core/settings.ts";
+import type { ModelsNotConfigured, ProviderKeyMissing } from "../core/settings.ts";
+import { providerKeyPresent } from "./keys.ts";
+import { effectiveSettings, stores } from "./stores.ts";
+
+/**
+ * The course server seam (course mode, docs/course-mode.md "Server and
+ * routes"): orchestration only. Structure lives in the CourseStore, the
+ * lesson<->session link on the chat record, status is derived from the
+ * linked chat's transcript (core/courses.ts) — nothing here is stored twice.
+ */
+
+export type LessonView = Lesson & { status: LessonStatus; chatId: string | null };
+
+export interface CourseView {
+	course: Course;
+	lessons: LessonView[];
+	continueLessonId: string | null;
+	progress: { completed: number; total: number };
+}
+
+export interface CourseSummary {
+	id: string;
+	title: string;
+	topic: string;
+	updatedAt: string;
+	progress: { completed: number; total: number };
+	continueLessonId: string | null;
+}
+
+/** lessonId -> the OLDEST chat linked to that lesson of this course
+ *  (one lesson = one session). */
+function lessonChatIds(courseId: string): Map<string, string> {
+	const oldest = new Map<string, { id: string; createdAt: string }>();
+	for (const c of stores.chatStore.listChats()) {
+		if (c.lesson?.courseId !== courseId) continue;
+		const cur = oldest.get(c.lesson.lessonId);
+		if (!cur || c.createdAt < cur.createdAt) oldest.set(c.lesson.lessonId, { id: c.id, createdAt: c.createdAt });
+	}
+	return new Map([...oldest].map(([lessonId, v]) => [lessonId, v.id]));
+}
+
+function viewOf(course: Course): CourseView {
+	const chatIds = lessonChatIds(course.id);
+	const statuses: Record<string, LessonStatus> = {};
+	const lessons = course.lessons.map((l): LessonView => {
+		const chatId = chatIds.get(l.id) ?? null;
+		const status = lessonStatus(chatId ? stores.chatStore.getChat(chatId) : null);
+		statuses[l.id] = status;
+		return { ...l, status, chatId };
+	});
+	return {
+		course,
+		lessons,
+		continueLessonId: continueLessonId(course, statuses),
+		progress: courseProgress(course, statuses),
+	};
+}
+
+export function courseView(id: string): CourseView | null {
+	const course = stores.courseStore.getCourse(id);
+	return course ? viewOf(course) : null;
+}
+
+export function listCourseViews(): CourseSummary[] {
+	return stores.courseStore.listCourses().map((course) => {
+		const v = viewOf(course);
+		return {
+			id: course.id,
+			title: course.title,
+			topic: course.topic,
+			updatedAt: course.updatedAt,
+			progress: v.progress,
+			continueLessonId: v.continueLessonId,
+		};
+	});
+}
+
+export type DraftOutcome =
+	| { ok: true; draft: CourseDraft }
+	| { ok: false; status: 503; body: ModelsNotConfigured | ProviderKeyMissing }
+	| { ok: false; status: 502; body: { error: string } };
+
+/** One strong-slot model call; nothing saved. The engine resolves exactly
+ *  like the teacher's (chat-handler): strong slot, key-presence gated. */
+export async function draftCourseFor(topic: string, intake: CourseIntake): Promise<DraftOutcome> {
+	const spec = resolveConversationSpec(undefined, effectiveSettings().models.strong);
+	if (!spec) return { ok: false, status: 503, body: modelsNotConfigured(["strong"]) };
+	if (!providerKeyPresent(spec.provider)) {
+		return { ok: false, status: 503, body: providerKeyMissing(spec.provider, ["strong"]) };
+	}
+	try {
+		const draft = await draftCourse({ topic, intake }, { engine: piEngineForSpec(spec, false) });
+		return { ok: true, draft };
+	} catch (err) {
+		return { ok: false, status: 502, body: { error: err instanceof Error ? err.message : String(err) } };
+	}
+}
+
+export function createCourseFromDraft(input: {
+	topic: string;
+	intake: CourseIntake;
+	title: string;
+	lessons: Array<{ title: string; goal: string; learnerAdded?: boolean }>;
+}): Course {
+	const ids: string[] = [];
+	const lessons = input.lessons.map((l): Lesson => {
+		const id = lessonIdFor(l.title, ids);
+		ids.push(id);
+		return { id, title: l.title, goal: l.goal, origin: l.learnerAdded ? "learner" : "syllabus" };
+	});
+	return stores.courseStore.createCourse({ title: input.title, topic: input.topic, intake: input.intake, lessons });
+}
+
+/** Save the learner's syllabus edits. Known ids keep origin + addedReason;
+ *  id-less entries are new learner lessons; omitted lessons just vanish
+ *  (their sessions stay ordinary sessions). Throws on unknown course or an
+ *  id that isn't in the course / is repeated (the route maps to 400/404). */
+export function saveCourseEdits(
+	id: string,
+	input: { title: string; lessons: Array<{ id?: string; title: string; goal: string }> },
+): CourseView | null {
+	const course = stores.courseStore.getCourse(id);
+	if (!course) return null;
+	const existing = new Map(course.lessons.map((l) => [l.id, l]));
+	const used = new Set<string>();
+	for (const l of input.lessons) {
+		if (l.id === undefined) continue;
+		if (!existing.has(l.id)) throw new Error(`Unknown lesson id: ${l.id}`);
+		if (used.has(l.id)) throw new Error(`Duplicate lesson id: ${l.id}`);
+		used.add(l.id);
+	}
+	const taken = new Set([...existing.keys()]);
+	const lessons = input.lessons.map((l): Lesson => {
+		if (l.id !== undefined) {
+			const prev = existing.get(l.id)!;
+			return { ...prev, title: l.title, goal: l.goal };
+		}
+		const newId = lessonIdFor(l.title, taken);
+		taken.add(newId);
+		return { id: newId, title: l.title, goal: l.goal, origin: "learner" };
+	});
+	return viewOf(stores.courseStore.saveCourse(id, { title: input.title, lessons }));
+}
+
+/** Delete the course; its sessions remain (their link just dangles). */
+export function deleteCourse(id: string): boolean {
+	return stores.courseStore.deleteCourse(id);
+}
+
+export type StartLessonResult =
+	| { chatId: string; resumed: true }
+	| { chatId: string; resumed: false; prompt: string };
+
+/** Resume the lesson's session, or birth one (stamped from the strong slot
+ *  like POST /api/chats). null = unknown course or lesson. */
+export function startLesson(courseId: string, lessonId: string): StartLessonResult | null {
+	const course = stores.courseStore.getCourse(courseId);
+	const lesson = course?.lessons.find((l) => l.id === lessonId);
+	if (!course || !lesson) return null;
+	const linked = lessonChatIds(courseId).get(lessonId);
+	if (linked) return { chatId: linked, resumed: true };
+	const chat = stores.chatStore.createChat(lesson.title, undefined, { courseId, lessonId });
+	// Same birth stamp as POST /api/chats: the strong slot, verbatim; absent
+	// slot -> no stamp (the turn gate's 503 refuses honestly downstream).
+	const strong = stores.settingsStore.readSettings()?.models?.strong;
+	if (strong?.model) {
+		stores.chatStore.saveSettings(chat.id, {
+			model: { provider: strong.model.provider, id: strong.model.id },
+			thinkingLevel: strong.thinkingLevel,
+		});
+	}
+	return { chatId: chat.id, resumed: false, prompt: lesson.goal };
+}
+
+// ─── Request-body parsing (hand validation, like the other routes) ──────────
+
+const str = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
+
+export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
+
+export function parseIntake(raw: unknown): Parsed<CourseIntake> {
+	const o = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+	const level = str(o.level);
+	const purpose = str(o.purpose);
+	const depth = str(o.depth);
+	if (!level) return { ok: false, error: "intake.level must be a non-empty string" };
+	if (!purpose) return { ok: false, error: "intake.purpose must be a non-empty string" };
+	if (!depth) return { ok: false, error: "intake.depth must be a non-empty string" };
+	if (o.notes !== undefined && typeof o.notes !== "string") return { ok: false, error: "intake.notes must be a string" };
+	const notes = str(o.notes);
+	return { ok: true, value: { level, purpose, depth, ...(notes ? { notes } : {}) } };
+}
+
+/** A non-empty array of lessons with trimmed title/goal; `id` / `learnerAdded`
+ *  pass through when well-typed. */
+export function parseLessons(raw: unknown): Parsed<Array<{ id?: string; title: string; goal: string; learnerAdded?: boolean }>> {
+	if (!Array.isArray(raw) || raw.length === 0) return { ok: false, error: "lessons must be a non-empty array" };
+	const out: Array<{ id?: string; title: string; goal: string; learnerAdded?: boolean }> = [];
+	for (const [i, item] of raw.entries()) {
+		const o = (typeof item === "object" && item !== null ? item : {}) as Record<string, unknown>;
+		const title = str(o.title);
+		const goal = str(o.goal);
+		if (!title) return { ok: false, error: `lessons[${i}].title must be a non-empty string` };
+		if (!goal) return { ok: false, error: `lessons[${i}].goal must be a non-empty string` };
+		if (o.id !== undefined && str(o.id) === null) return { ok: false, error: `lessons[${i}].id must be a non-empty string` };
+		if (o.learnerAdded !== undefined && typeof o.learnerAdded !== "boolean") {
+			return { ok: false, error: `lessons[${i}].learnerAdded must be a boolean` };
+		}
+		out.push({
+			...(o.id !== undefined ? { id: str(o.id)! } : {}),
+			title,
+			goal,
+			...(o.learnerAdded !== undefined ? { learnerAdded: o.learnerAdded as boolean } : {}),
+		});
+	}
+	return { ok: true, value: out };
+}
+
+export { str as nonEmptyTrimmed };
