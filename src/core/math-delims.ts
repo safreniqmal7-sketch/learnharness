@@ -114,8 +114,27 @@ export function healOverescapedCommands(text: string): string {
 	return text.includes("\\\\") ? mapMathContent(text, recoverCommandRuns) : text;
 }
 
+/** An even backslash run before a currency dollar (`$` + digit) is an
+ * over-escaped literal dollar: `\\$10` was meant as `\$10`. Runs before span
+ * reading, because the extra backslash makes that dollar a span boundary and
+ * mis-pairs every dollar after it. Native TeX never ends inline math on a row
+ * break straight into a number, so the pattern is its own evidence; odd runs
+ * (already a literal dollar) and code stay raw. */
+const overescapedDollar = /(?<!\\)(?:\\\\)+\$(?=\d)/g;
+export function healOverescapedDollars(text: string): string {
+	if (!text.includes("\\\\$")) return text;
+	const code: [number, number][] = [];
+	let offset = 0;
+	for (const span of readContentSpans(text)) {
+		if (span.kind === "code") code.push([offset, offset + span.raw.length]);
+		offset += span.raw.length;
+	}
+	return text.replace(overescapedDollar, (run: string, at: number) =>
+		code.some(([start, end]) => at >= start && at < end) ? run : "\\$");
+}
+
 /** Presentation-only, language-independent recovery. Shape parsing, saved
  * identities, grading and model history must use the unprojected source. */
 export function repairMathForDisplay(text: string): string {
-	return healOverescapedCommands(restoreMathEscapes(recoverDocumentLayout(text)));
+	return healOverescapedCommands(restoreMathEscapes(recoverDocumentLayout(healOverescapedDollars(text))));
 }
