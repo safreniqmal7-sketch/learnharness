@@ -114,3 +114,16 @@ test("recovery converges after one pass, including multiple debris characters", 
 		assert.equal(repairMathForDisplay(once), once);
 	}
 });
+test("over-escaped currency dollars recover to literal dollars before span reading", () => {
+	// DeepSeek V4.1 Flash, live microeconomics probe (2026-10-26): the question
+	// field carried `\$` while its own options carried a correct `\$`.
+	const question = math`total cost of $\$10{,}000$, or 101 loaves at $\$10{,}090$. What is`;
+	assert.equal(repairMathForDisplay(question), math`total cost of $\$10{,}000$, or 101 loaves at $\$10{,}090$. What is`);
+	assert.equal(repairMathForDisplay(math`$\$10{,}090 - \$10{,}000 = \$90$`), math`$\$10{,}090 - \$10{,}000 = \$90$`);
+	assert.equal(repairMathForDisplay(math`costs \\$90 in prose`), math`costs \$90 in prose`);
+	for (const source of [math`$\$90$ and \$5`, math`$$\na\b\$$`, math`$a\$ b`, "`\\$5` and\n```\n\\$5\n```"]) {
+		assert.equal(repairMathForDisplay(source), source);
+	}
+	const once = repairMathForDisplay(question);
+	assert.equal(repairMathForDisplay(once), once);
+});
