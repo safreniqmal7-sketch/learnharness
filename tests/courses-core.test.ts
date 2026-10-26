@@ -6,6 +6,7 @@ import {
 	lessonCompleted,
 	lessonCompletionProblems,
 	lessonGoalNodeIds,
+	lessonIdFor,
 	lessonStatus,
 } from "../src/core/courses.ts";
 import { LESSON_COMPLETE_TOOL, type Course, type LessonStatus, type PlanTree } from "../src/core/contracts.ts";
@@ -167,4 +168,12 @@ test("continueLessonId and courseProgress", () => {
 	assert.equal(continueLessonId({ ...course, lessons: [] }, {}), null);
 	assert.deepEqual(courseProgress(course, s({ l1: "complete", l2: "in-progress" })), { completed: 1, total: 3 });
 	assert.deepEqual(courseProgress({ ...course, lessons: [] }, {}), { completed: 0, total: 0 });
+});
+
+test("lessonIdFor slugifies and stays unique within the course", () => {
+	assert.equal(lessonIdFor("Price Elasticity of Demand", []), "price-elasticity-of-demand");
+	assert.equal(lessonIdFor("Supply & demand", ["supply-demand"]), "supply-demand-2");
+	assert.equal(lessonIdFor("Supply & demand", ["supply-demand", "supply-demand-2"]), "supply-demand-3");
+	assert.equal(lessonIdFor("Économie", []), "economie");
+	assert.equal(lessonIdFor("¿?", []), "lesson");
 });

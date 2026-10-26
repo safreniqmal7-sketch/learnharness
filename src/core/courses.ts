@@ -134,3 +134,14 @@ export function courseProgress(
 		total: course.lessons.length,
 	};
 }
+
+/** A new lesson's stable id: the title slugified, made unique against the
+ *  course's existing ids with a numeric suffix. Shared by every writer that
+ *  adds lessons (draft save, learner edits, the teacher's course_add_lesson)
+ *  so ids look the same whoever chose them. */
+export function lessonIdFor(title: string, existingIds: Iterable<string>): string {
+	const taken = new Set(existingIds);
+	const base = title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "lesson";
+	if (!taken.has(base)) return base;
+	for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
+}
