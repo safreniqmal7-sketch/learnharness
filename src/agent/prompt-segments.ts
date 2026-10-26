@@ -30,6 +30,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { PATHS, PROMPTS_OVERRIDE_DIR } from "../../config.ts";
+import type { Course, Lesson } from "../core/contracts.ts";
 import { FRAGMENT_RE, isValidSegmentPath, type PromptAgent, type PromptSegmentInfo } from "../core/prompt-segments.ts";
 
 const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
@@ -71,7 +72,7 @@ export function listSourceSegments(agent: PromptAgent): Array<{ path: string; sh
 	// plays the base role), but the FORMATTING guide composes for every
 	// agent (owner, 2026-10-04 late): LaTeX delimiters and markdown apply
 	// in all settings — practice shares the $...$/$$...$$ authoring contract.
-	const segments: Array<{ path: string; shared: boolean; file: string }> = agent === "practice" ? [] : [
+	const segments: Array<{ path: string; shared: boolean; file: string }> = agent === "practice" || agent === "course" ? [] : [
 		{ path: "system-prompt.md", shared: true, file: PATHS.teacherPrompt },
 	];
 	const dir = path.join(PROMPTS_DIR, agent);
@@ -81,8 +82,10 @@ export function listSourceSegments(agent: PromptAgent): Array<{ path: string; sh
 			segments.push({ path: `${agent}/${f}`, shared: false, file: path.join(dir, f) });
 		}
 	}
+	// COURSE (lesson sessions only): its fragments alone — the teacher's
+	// composition already carries the base and the shared appendix.
 	const sharedDir = path.join(PROMPTS_DIR, "shared");
-	if (fs.existsSync(sharedDir)) {
+	if (agent !== "course" && fs.existsSync(sharedDir)) {
 		// The practice allowlist (owner, 2026-10-04 late): formatting only.
 		const allow = agent === "practice" ? PRACTICE_SHARED_FRAGMENTS : null;
 		const sharedFragments = fs
@@ -124,10 +127,29 @@ export function effectivePromptSegments(
 	});
 }
 
+/** The lesson context block (course mode): rebuilt every turn from the
+ *  CURRENT course, appended after the composed prompt in lesson sessions.
+ *  Plain text — the course title, this lesson, and the ordered syllabus
+ *  with this lesson marked. Pure. */
+export function lessonContextBlock(course: Course, lesson: Lesson): string {
+	const index = course.lessons.findIndex((l) => l.id === lesson.id);
+	const syllabus = course.lessons.map((l) => `${l.id === lesson.id ? "-> " : "   "}${l.id} — ${l.title}: ${l.goal}`);
+	return [
+		"## Lesson context",
+		"",
+		`Course: ${course.title}`,
+		`This lesson (${index + 1} of ${course.lessons.length}): ${lesson.id} — ${lesson.title}`,
+		`Goal: ${lesson.goal}`,
+		"",
+		'Syllabus, in order ("->" marks this lesson):',
+		...syllabus,
+	].join("\n");
+}
+
 /** Every known segment path across both agents (route validation). */
 export function allSegmentPaths(): string[] {
 	const paths = new Set<string>();
-	for (const agent of ["prober", "teacher", "practice"] as const) {
+	for (const agent of ["prober", "teacher", "practice", "course"] as const) {
 		for (const segment of listSourceSegments(agent)) paths.add(segment.path);
 	}
 	return [...paths].sort();

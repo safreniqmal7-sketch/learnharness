@@ -17,6 +17,7 @@ import type { JobRecord } from "../core/contracts.ts";
 import type { JobStore } from "../core/ports.ts";
 import { jobTools, type DemoInput, type PdfInput, type ResearchInput, type VisualInput } from "./tools/jobs.ts";
 import { planTools, type PlanToolContext } from "./tools/plan.ts";
+import { courseTools } from "./tools/course.ts";
 import { probeDoneTool, type ProbeDoneContext } from "./tools/probe.ts";
 import { proberGraphTools } from "./tools/graph.ts";
 import { readTool } from "./tools/read.ts";
@@ -24,7 +25,8 @@ import { lsTool } from "./tools/ls.ts";
 import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
 import { healToolRecord } from "./tools/heal.ts";
-import type { GraphStore } from "../core/ports.ts";
+import type { CourseStore, GraphStore } from "../core/ports.ts";
+import type { LessonLink } from "../core/contracts.ts";
 
 export { jobTools };
 export type { ProbeDoneContext } from "./tools/probe.ts";
@@ -400,6 +402,12 @@ export interface TeacherToolContext extends PlanToolContext {
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
 	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
+	/** Course mode: present ONLY for a lesson session whose course exists
+	 *  (the handler resolves the record's `lesson` link). Adds lesson_complete
+	 *  + course_add_lesson and exposes `quiz` beside `explain` under free
+	 *  recall (the final multiple-choice check). Absent = an ordinary
+	 *  session: the registry is exactly what it always was. */
+	lesson?: { link: LessonLink; courseStore: CourseStore };
 }
 
 /**
@@ -442,7 +450,9 @@ export function createTeacherTools(
 	// Same widening as the prober's (see above) — the conditional spread of
 	// two differently-typed literals collapses into an unusable union type.
 	const quizzing: Record<string, AgentTool<any>> =
-		mechanics === "free" ? { explain: teachExplainToolFor(ctx) } : { quiz: teachQuizToolFor(ctx) };
+		mechanics === "free"
+			? { explain: teachExplainToolFor(ctx), ...(ctx.lesson ? { quiz: teachQuizToolFor(ctx) } : {}) }
+			: { quiz: teachQuizToolFor(ctx) };
 	// healToolRecord — same standard as the prober's registry (above).
 	return healToolRecord(
 		filterEnabledTools(
@@ -458,6 +468,9 @@ export function createTeacherTools(
 			find: findTool,
 			grep: grepTool,
 			...planTools(ctx),
+				...(ctx.lesson
+					? courseTools({ chatId: ctx.chatId, chatStore: ctx.chatStore, courseStore: ctx.lesson.courseStore, link: ctx.lesson.link })
+					: {}),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
 		},
 		withoutMechanics(enabled),
