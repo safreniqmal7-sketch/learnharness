@@ -80,3 +80,6 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// courses.ts (course mode, 2026-10-26): lesson status / completion gate /
+// course progress, derived from transcripts. Pure, browser-safe.
+export * from "./courses.ts";
