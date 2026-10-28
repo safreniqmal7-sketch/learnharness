@@ -669,6 +669,24 @@ describe("predict vs check rendering", () => {
 		assert.ok(!html.includes(">Quiz<"), "the generic label is retired");
 	});
 
+	it("a transfer quiz reads the 'New case' eyebrow in the dock and on the answered card", () => {
+		const html = renderToStaticMarkup(
+			<QuestionDock
+				{...{
+					toolName: "quiz" as const,
+					toolCallId: "call-t1",
+					input: { ...quizInput, type: "transfer", nodeId: "planet-order" },
+				}}
+				expanded={true}
+				onExpand={() => {}}
+				onSubmit={() => {}}
+			/>,
+		);
+		assert.ok(html.includes("New case"), `eyebrow missing: ${html.slice(0, 200)}`);
+		const answer = buildAnswer({ ...quizQD(), questionType: "transfer" }, { values: ["Venus"] });
+		assert.ok(renderToStaticMarkup(<AnsweredCard answer={answer} />).includes("New case"));
+	});
+
 	it("a prediction answer SHOWS the verdict but TUCKS the explanation behind a toggle", () => {
 		const qd: QuestionData = { ...quizQD(), questionType: "predict" };
 		const answer = buildAnswer(qd, { values: ["Venus"] }); // wrong on purpose

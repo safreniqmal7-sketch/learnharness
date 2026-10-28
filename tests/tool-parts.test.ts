@@ -60,6 +60,12 @@ describe("parseQuizInput", () => {
 		assert.equal((parsed as { type?: unknown }).type, "check", "the role field survives the display parse (owner 2026-10-03)");
 	});
 
+	it("the display parse keeps type \"transfer\"", () => {
+		const parsed = parseQuizInput({ ...TEACHER_QUIZ, type: "transfer" });
+		assert.ok(parsed);
+		assert.equal((parsed as { type?: unknown }).type, "transfer");
+	});
+
 	it("parses a boundary-valid PROBER quiz (no nodeId at all)", () => {
 		assert.ok(parseQuizInput(PROBER_QUIZ));
 	});

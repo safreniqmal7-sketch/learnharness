@@ -69,9 +69,9 @@ const TREE = {
 
 /** A quiz check on node b, answered with the given verdict (the record shape
  *  the gate folds: assistant toolCall + non-error toolResult with details). */
-function answeredCheck(id: string, correct: boolean, confidence: number): LhMessage[] {
+function answeredCheck(id: string, correct: boolean, confidence: number, type: "check" | "transfer" = "check"): LhMessage[] {
 	return [
-		{ id: `c-${id}`, role: "assistant", content: [{ type: "toolCall", id, name: "quiz", arguments: { type: "check", nodeId: "b" } }] },
+		{ id: `c-${id}`, role: "assistant", content: [{ type: "toolCall", id, name: "quiz", arguments: { type, nodeId: "b" } }] },
 		{ id: `r-${id}`, role: "toolResult", toolCallId: id, toolName: "quiz", content: [], details: { kind: "quiz", correct, confidence, dontKnow: false }, isError: false },
 	] as unknown as LhMessage[];
 }
@@ -192,6 +192,14 @@ describe("tools", () => {
 		assert.equal("explain" in toolsFor(course, "scarcity", "c"), false);
 	});
 
+	it("quiz schema: only lesson sessions accept the transfer type", () => {
+		const course = newCourse();
+		const base = createTeacherTools({ chatId: "c", chatStore, jobStore: {} as never, spawn: () => {} });
+		const lesson = toolsFor(course, "scarcity", "c");
+		assert.equal(JSON.stringify(base.quiz!.parameters).includes("transfer"), false);
+		assert.equal(JSON.stringify(lesson.quiz!.parameters).includes("transfer"), true);
+	});
+
 	it("course_add_lesson: insertion order, origin/addedReason, unique ids, end/unknown placement", async () => {
 		const course = newCourse();
 		const t = toolsFor(course, "demand", "c").course_add_lesson!;
@@ -236,8 +244,14 @@ describe("tools", () => {
 		chatStore.saveMessages(chat.id, [...messages, ...answeredCheck("q1", false, 90)]);
 		messages = await completeThroughAgent(chat.id, course);
 		assert.equal(lessonCompleted(messages), false);
-		// a correct, confident answer: accepted
+		// a correct, confident CHECK alone is still refused: a transfer is required
 		chatStore.saveMessages(chat.id, [...chatStore.getChat(chat.id)!.messages, ...answeredCheck("q2", true, 90)]);
+		messages = await completeThroughAgent(chat.id, course);
+		assert.equal(lessonCompleted(messages), false);
+		const needTransfer = messages.filter((m) => (m as any).role === "toolResult" && (m as any).toolName === "lesson_complete").at(-1) as any;
+		assert.match(needTransfer.content[0].text, /No passing transfer question yet/);
+		// a correct, confident transfer: accepted
+		chatStore.saveMessages(chat.id, [...chatStore.getChat(chat.id)!.messages, ...answeredCheck("q3", true, 90, "transfer")]);
 		messages = await completeThroughAgent(chat.id, course);
 		const accepted = messages.filter((m) => (m as any).role === "toolResult" && (m as any).toolName === "lesson_complete").at(-1) as any;
 		assert.equal(accepted.isError, false);

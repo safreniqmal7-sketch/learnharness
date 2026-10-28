@@ -11,11 +11,14 @@
  *
  * THE COMPLETION GATE (`lessonCompletionProblems`, owner decisions): the
  * teacher may only finish a lesson when EVERY goal node of the plan map —
- * its sinks, the nodes nothing depends on — has a passing final check. The
- * evidence is the latest ANSWERED multiple-choice `quiz` call of type
- * "check" on that node: correct, at >= LESSON_COMPLETE_MIN_CONFIDENCE, and
- * not "I don't know". `explain` answers never count (they carry no
- * app-graded verdict), nor do predictions, nor dismissed questions. The
+ * its sinks, the nodes nothing depends on — has a passing final check, AND
+ * the lesson holds one passing TRANSFER question (a check on a new case) on
+ * a goal node. The evidence is the latest ANSWERED multiple-choice `quiz`
+ * call of type "check" or "transfer" on that node (a transfer counts as its
+ * node's check): correct, at >= LESSON_COMPLETE_MIN_CONFIDENCE, and not "I
+ * don't know". The transfer rule reads the latest answered transfer on a
+ * goal node. `explain` answers never count (they carry no app-graded
+ * verdict), nor do predictions, untyped records, or dismissed questions. The
  * problems are written for the TEACHER (agent-facing) and say what to do.
  *
  * Pure: no fs, no network, no node builtins — safe on server, client, tests.
@@ -39,69 +42,107 @@ export function lessonGoalNodeIds(tree: PlanTree): string[] {
 	return tree.nodes.filter((n) => !prerequisites.has(n.id)).map((n) => n.id);
 }
 
-/** A node's latest answered check, as the gate reads it. */
-type CheckVerdict = Pick<QuestionAnswerData, "correct" | "confidence" | "dontKnow">;
+/** One answered check-or-transfer, as the gate reads it. */
+type CheckVerdict = Pick<QuestionAnswerData, "correct" | "confidence" | "dontKnow"> & { kind: "check" | "transfer" };
 
-/** Fold the record into nodeId -> latest answered quiz check. A check is
- *  `quiz` + arguments.type "check" + a nodeId; "answered" = a later
+/** pass = correct, not "I don't know", at >= LESSON_COMPLETE_MIN_CONFIDENCE. */
+const passes = (v: CheckVerdict): boolean =>
+	v.correct === true && !v.dontKnow && v.confidence !== undefined && v.confidence >= LESSON_COMPLETE_MIN_CONFIDENCE;
+
+/** Fold the record into the gate's evidence: `byNode` = nodeId -> latest
+ *  answered check-or-transfer (a transfer counts as its node's check), and
+ *  `transfers` = every answered transfer in record order (the caller keeps
+ *  the latest one on a goal node). A check/transfer is `quiz` +
+ *  arguments.type "check" | "transfer" + a nodeId; "answered" = a later
  *  non-error, non-dismissed toolResult for that call id. Later answers win
- *  (record order), so an unanswered newer check falls back to the last
- *  answered one. */
-function latestChecksByNode(messages: readonly LhMessage[]): Map<string, CheckVerdict> {
-	const checkNode = new Map<string, string>(); // toolCallId -> nodeId
-	const latest = new Map<string, CheckVerdict>();
+ *  (record order), so an unanswered newer question falls back to the last
+ *  answered one. Records with no `type` never count. */
+function foldChecks(messages: readonly LhMessage[]): {
+	byNode: Map<string, CheckVerdict>;
+	transfers: Array<CheckVerdict & { nodeId: string }>;
+} {
+	const calls = new Map<string, { nodeId: string; kind: "check" | "transfer" }>(); // toolCallId
+	const byNode = new Map<string, CheckVerdict>();
+	const transfers: Array<CheckVerdict & { nodeId: string }> = [];
 	for (const m of messages) {
 		if (m.role === "assistant") {
 			for (const block of m.content) {
 				if (block.type !== "toolCall" || block.name !== "quiz") continue;
 				const args = block.arguments as { nodeId?: unknown; type?: unknown } | undefined;
-				if (args?.type === "check" && typeof args.nodeId === "string" && args.nodeId.length > 0) {
-					checkNode.set(block.id, args.nodeId);
+				if (
+					(args?.type === "check" || args?.type === "transfer") &&
+					typeof args.nodeId === "string" &&
+					args.nodeId.length > 0
+				) {
+					calls.set(block.id, { nodeId: args.nodeId, kind: args.type });
 				}
 			}
 		} else if (m.role === "toolResult") {
 			if (m.toolName !== "quiz" || m.isError) continue;
-			const nodeId = checkNode.get(m.toolCallId);
-			if (nodeId === undefined) continue;
+			const call = calls.get(m.toolCallId);
+			if (call === undefined) continue;
 			const details = (m.details ?? {}) as Partial<QuestionAnswerData>;
 			if (details.dismissed === true) continue;
-			latest.set(nodeId, {
+			const verdict: CheckVerdict = {
 				correct: details.correct,
 				confidence: details.confidence,
 				dontKnow: details.dontKnow === true,
-			});
+				kind: call.kind,
+			};
+			byNode.set(call.nodeId, verdict);
+			if (call.kind === "transfer") transfers.push({ ...verdict, nodeId: call.nodeId });
 		}
 	}
-	return latest;
+	return { byNode, transfers };
 }
 
 /** The completion gate. Empty = accepted; otherwise one agent-facing
- *  problem per failing goal node (or one for a missing plan map). */
+ *  problem per failing goal node (or one for a missing plan map), plus one
+ *  for the lesson's transfer question. */
 export function lessonCompletionProblems(tree: PlanTree | undefined, messages: readonly LhMessage[]): string[] {
 	if (!tree) {
 		return [
 			"No plan map yet — build one (plan_init) and check the learner on its goal nodes before completing the lesson.",
 		];
 	}
-	const checks = latestChecksByNode(messages);
+	const { byNode, transfers } = foldChecks(messages);
 	const titles = new Map(tree.nodes.map((n) => [n.id, n.title]));
+	const goals = lessonGoalNodeIds(tree);
 	const problems: string[] = [];
-	for (const id of lessonGoalNodeIds(tree)) {
+	for (const id of goals) {
 		const label = `Goal node "${id}" (${titles.get(id) ?? id})`;
-		const ask = `pose a multiple-choice quiz check (type "check") on node "${id}"`;
-		const check = checks.get(id);
+		const ask = `pose a multiple-choice quiz check (type "check" or "transfer") on node "${id}"`;
+		const check = byNode.get(id);
 		if (!check) {
-			problems.push(`${label} has no answered multiple-choice check. Pose one (quiz, type "check", nodeId "${id}"), then call ${LESSON_COMPLETE_TOOL} again.`);
+			problems.push(`${label} has no answered multiple-choice check (or transfer). Pose one (quiz, type "check" or "transfer", nodeId "${id}"), then call ${LESSON_COMPLETE_TOOL} again.`);
 		} else if (check.dontKnow) {
-			problems.push(`${label}: the learner answered "I don't know" on the latest check. Re-teach it, then ${ask}.`);
+			problems.push(`${label}: the learner answered "I don't know" on the latest check (or transfer). Re-teach it, then ${ask}.`);
 		} else if (check.correct !== true) {
-			problems.push(`${label}: the latest check was answered wrong. Re-teach it, then ${ask}.`);
+			problems.push(`${label}: the latest check (or transfer) was answered wrong. Re-teach it, then ${ask}.`);
 		} else if (check.confidence === undefined || check.confidence < LESSON_COMPLETE_MIN_CONFIDENCE) {
 			const shown = check.confidence === undefined ? "none stated" : `${check.confidence}%`;
 			problems.push(
-				`${label}: the latest check was correct but confidence was ${shown}, below ${LESSON_COMPLETE_MIN_CONFIDENCE}%. Consolidate, then ${ask} again.`,
+				`${label}: the latest check (or transfer) was correct but confidence was ${shown}, below ${LESSON_COMPLETE_MIN_CONFIDENCE}%. Consolidate, then ${ask} again.`,
 			);
 		}
+	}
+	const goalSet = new Set(goals);
+	const latestTransfer = transfers.filter((t) => goalSet.has(t.nodeId)).at(-1);
+	const ids = goals.map((g) => `"${g}"`).join(", ");
+	const newCase =
+		`pose a multiple-choice quiz with type "transfer" on one of the goal nodes (${ids}) that applies the idea to a case NOT used in this lesson ` +
+		`but answerable by reasoning from what was taught; the learner must answer it correctly at ${LESSON_COMPLETE_MIN_CONFIDENCE}% confidence or more`;
+	if (!latestTransfer) {
+		problems.push(`No passing transfer question yet: ${newCase}; then call ${LESSON_COMPLETE_TOOL} again.`);
+	} else if (!passes(latestTransfer)) {
+		const why = latestTransfer.dontKnow
+			? `the learner answered "I don't know"`
+			: latestTransfer.correct !== true
+				? "it was answered wrong"
+				: `it was correct but confidence was ${latestTransfer.confidence === undefined ? "none stated" : `${latestTransfer.confidence}%`}, below ${LESSON_COMPLETE_MIN_CONFIDENCE}%`;
+		problems.push(
+			`The latest transfer question (node "${latestTransfer.nodeId}") did not pass: ${why}. Re-teach the underlying idea (not the case), then ${newCase}; then call ${LESSON_COMPLETE_TOOL} again.`,
+		);
 	}
 	return problems;
 }

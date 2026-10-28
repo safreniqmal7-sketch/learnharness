@@ -23,6 +23,9 @@ import {
 	explainInputObject,
 	explainInputProblems,
 	quizInputSchema,
+	quizInputObject,
+	lessonQuizInputObject,
+	questionTypeLabel,
 	probeQuizInputSchema,
 	quizDisplayInputSchema,
 	normalizeQuizType,
@@ -757,6 +760,34 @@ describe("the quiz role field (predict | check)", () => {
 		assert.equal(normalizeQuizType(undefined), undefined);
 		assert.equal(normalizeQuizType("prediction"), undefined);
 		assert.equal(normalizeQuizType(42), undefined);
+		assert.equal(normalizeQuizType("transfer"), "transfer");
+		assert.equal(normalizeQuizType('"transfer"'), "transfer", "quoted debris heals");
+	});
+
+	it("questionNeedsReveal: a transfer collapses like a check in the teach phase", () => {
+		assert.equal(questionNeedsReveal("quiz", { type: "transfer" }, "teach"), true);
+		assert.equal(questionNeedsReveal("quiz", { type: "transfer" }, "probe"), false);
+	});
+
+	it("questionTypeLabel: predict -> Prediction, transfer -> New case, else Check", () => {
+		assert.equal(questionTypeLabel("predict"), "Prediction");
+		assert.equal(questionTypeLabel("transfer"), "New case");
+		assert.equal(questionTypeLabel('"transfer"'), "New case");
+		assert.equal(questionTypeLabel("check"), "Check");
+		assert.equal(questionTypeLabel(undefined), "Check");
+		assert.equal(questionTypeLabel("bogus"), "Check");
+	});
+
+	it("only the lesson quiz schema accepts transfer; the ordinary quiz and explain reject it", () => {
+		const t = { ...valid, type: "transfer" };
+		assert.equal(Value.Check(lessonQuizInputObject, t), true);
+		assert.equal(Value.Check(lessonQuizInputObject, valid), true);
+		assert.equal(Value.Check(quizInputObject, t), false);
+		assert.equal(
+			Value.Check(explainInputObject, { question: "q", correctAnswer: "a", type: "transfer", nodeId: "n" }),
+			false,
+		);
+		assert.deepEqual(Object.keys(lessonQuizInputObject.properties), Object.keys(quizInputObject.properties));
 	});
 
 	it("questionNeedsReveal: checks collapse, predictions never do — both teach tools", () => {

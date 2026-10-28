@@ -29,6 +29,7 @@ import {
 	coerceCorrectAnswer,
 	normalizeQuizType,
 	quizInputObject,
+	lessonQuizInputObject,
 	quizInputProblems,
 } from "../src/core/question-core.ts";
 import { parseQuizInput } from "../src/core/tool-parts.ts";
@@ -60,6 +61,14 @@ function whiteheadQuiz(type: unknown, correctAnswer: unknown) {
 }
 
 describe("the death-loop shape — quiz type with quotes baked in", () => {
+	it("transfer: heals the quoted literal against the lesson schema, and plain passes", () => {
+		const healed = healEncodedArguments({ type: QUOTED("transfer") }, lessonQuizInputObject) as { type: unknown };
+		assert.equal(healed.type, "transfer");
+		assert.equal(normalizeQuizType(QUOTED("transfer")), "transfer");
+		const plain = healEncodedArguments({ type: "transfer" }, lessonQuizInputObject) as { type: unknown };
+		assert.equal(plain.type, "transfer");
+	});
+
 	it("heals the quote-encoded literal (the ten-retry loop)", () => {
 		const healed = healEncodedArguments({ type: QUOTED("predict") }, quizInputObject) as {
 			type: unknown;

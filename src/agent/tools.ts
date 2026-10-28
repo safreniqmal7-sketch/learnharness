@@ -7,6 +7,7 @@ import {
 	explainInputBase,
 	explainInputObject,
 	explainInputProblems,
+	lessonQuizInputObject,
 	parseOptionsIfString,
 	probeQuizInputSchema,
 	quizInputObject,
@@ -374,12 +375,19 @@ function nodeIdProblem(ctx: Pick<PlanToolContext, "chatId" | "chatStore">, nodeI
  *  nodeId is REQUIRED (owner ruling 2026-09-26): the untagged ad-hoc quiz is
  *  gone — off-map checks route through ask_user_question, and the teach
  *  seam (first tagged quiz) is structurally guaranteed. */
-export function teachQuizToolFor(ctx: Pick<PlanToolContext, "chatId" | "chatStore">): AgentTool<typeof quizInputObject> {
+export function teachQuizToolFor(
+	ctx: Pick<PlanToolContext, "chatId" | "chatStore"> & { lesson?: unknown },
+): AgentTool<typeof quizInputObject> {
+	// Course-lesson sessions (ctx.lesson) get the schema whose `type` also
+	// accepts "transfer"; ordinary sessions keep quizInputObject untouched.
+	// The lesson schema is the same object with a wider `type` union, so the
+	// execute below (quizInputProblems / nodeId) is valid for both.
+	const parameters = ctx.lesson ? (lessonQuizInputObject as unknown as typeof quizInputObject) : quizInputObject;
 	return {
 		name: "quiz",
 		label: "quiz",
 		description: quizDescription({ name: "quiz", nodeId: true, types: true }),
-		parameters: quizInputObject,
+		parameters,
 		prepareArguments: prepareQuestionArguments,
 		executionMode: "sequential",
 		execute: async (_toolCallId, input) => {

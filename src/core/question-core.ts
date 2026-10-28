@@ -206,7 +206,7 @@ export const quizInputBase = Type.Object({
 // path accepts) runs at the CALL BOUNDARY in the tool's execute:
 // quizInputProblems here, the per-session plan-nodeId validation in
 // tools.ts (it reads the live chat record, which this core never touches).
-export const QUIZ_QUESTION_TYPES = ["predict", "check"] as const;
+export const QUIZ_QUESTION_TYPES = ["predict", "check", "transfer"] as const;
 export type QuizQuestionType = (typeof QUIZ_QUESTION_TYPES)[number];
 
 /** Normalize a persisted quiz `type` (display seam): old records carry
@@ -217,7 +217,15 @@ export type QuizQuestionType = (typeof QUIZ_QUESTION_TYPES)[number];
 export function normalizeQuizType(raw: unknown): QuizQuestionType | undefined {
 	if (typeof raw !== "string") return undefined;
 	const v = stripModelValueDebris(raw);
-	return v === "predict" ? "predict" : v === "check" ? "check" : undefined;
+	return v === "predict" ? "predict" : v === "check" ? "check" : v === "transfer" ? "transfer" : undefined;
+}
+
+/** The card/bar label for a quiz role: predict -> "Prediction", transfer ->
+ *  "New case" (a check on a new case, course lessons only), anything else
+ *  (check, old records with no type, unhealable wobble) -> "Check". */
+export function questionTypeLabel(type: unknown): string {
+	const t = normalizeQuizType(type);
+	return t === "predict" ? "Prediction" : t === "transfer" ? "New case" : "Check";
 }
 
 /** The reveal law as a pure predicate (owner 2026-10-03; explain joined
@@ -265,6 +273,25 @@ export const quizInputObject = Type.Object({
 			"For off-map checks use ask_user_question.",
 	}),
 	...quizInputBase.properties,
+});
+
+/** Course-lesson sessions only: the role field gains `transfer` (a check on
+ *  a NEW case). Bare words, never quoted (the quote-copy wobble). */
+const lessonQuizType = Type.Union([Type.Literal("predict"), Type.Literal("check"), Type.Literal("transfer")], {
+	description:
+		"REQUIRED — the question's role in the teaching cycle, as a bare word (no quotes): predict = posed BEFORE " +
+		"you teach the step (its own turn; the learner answers, then your teaching resolves it — arrives open, never " +
+		"collapsed); check = posed AFTER the step's teaching is complete (arrives collapsed behind the Check your " +
+		"understanding reveal); transfer = a check on a NEW case: apply the idea to a situation not used in the " +
+		"lesson, answerable by reasoning from it (arrives collapsed like a check). ONE question per turn either way.",
+});
+
+/** The lesson-session teach quiz object: identical to quizInputObject
+ *  (same property order) except `type` also accepts `transfer`. Ordinary
+ *  sessions keep quizInputObject, byte for byte. */
+export const lessonQuizInputObject = Type.Object({
+	...quizInputObject.properties,
+	type: lessonQuizType,
 });
 
 /** The PROBE-side quiz declaration: the shared authoring contract, no
@@ -391,7 +418,7 @@ export const askInputSchema = Type.Object({
 // graded, but duplicate values break the dock's value keying) runs at the
 // call boundary in execute (askOptionProblems, above).
 
-export type QuizToolInput = Static<typeof quizInputObject>;
+export type QuizToolInput = Static<typeof lessonQuizInputObject>;
 export type AskToolInput = Static<typeof askInputSchema>;
 export type ExplainToolInput = Static<typeof explainInputObject>;
 export type ProbeExplainToolInput = Static<typeof explainInputBase>;

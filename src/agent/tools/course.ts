@@ -60,7 +60,9 @@ export function courseTools(ctx: CourseToolContext): Record<string, AgentTool<an
 		label: LESSON_COMPLETE_TOOL,
 		description:
 			"Declare this course lesson complete. The app checks the evidence first: every goal node of your plan map " +
-			"needs a passing multiple-choice quiz check. Refused calls say which node failed (an error result); an accepted call ends the lesson.",
+			"needs a passing multiple-choice quiz check (type \"check\" or \"transfer\"), and the lesson needs one passing quiz of " +
+			"type \"transfer\" on a goal node — a new case answerable by reasoning from the lesson. Passing = correct at 70%+ " +
+			"confidence. Refused calls say what failed (an error result); an accepted call ends the lesson.",
 		parameters: lessonCompleteInput,
 		execute: async () => {
 			try {
