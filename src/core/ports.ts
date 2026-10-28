@@ -25,6 +25,8 @@ import type {
 	SessionCheckpoint,
 	TurnUsage,
 	NotesSource,
+	Course,
+	LessonLink,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
 
@@ -33,8 +35,9 @@ import type { UserSettings } from "./settings.ts";
 export interface ChatStore {
 	/** Create a session record (persisted immediately). */
 	/** Create a session record; kind "practice" marks a practice session
-	 *  (absent = teach, the default). */
-	createChat(title: string, kind?: "practice"): ChatRecord;
+	 *  (absent = teach, the default). `lesson` stamps a course-lesson
+	 *  session's link (course mode) — written once, here only. */
+	createChat(title: string, kind?: "practice", lesson?: LessonLink): ChatRecord;
 	/** The full record, or null if unknown id / corrupt file. */
 	getChat(id: string): ChatRecord | null;
 	/** All sessions, newest activity first (the sidebar's list view). */
@@ -222,3 +225,25 @@ export interface AuthStore {
 	deleteAuthVar(name: string): void;
 }
 
+
+// ─── CourseStore — course syllabi (data/courses, course mode 2026-10-26) ────
+
+/**
+ * Whole-file JSON per course, read-modify-write like chats/jobs. The
+ * course carries structure only; lesson progress derives from transcripts
+ * (core/courses.ts). The Course system is the sole writer — the teacher's
+ * course_add_lesson tool writes through this port, injected.
+ */
+export interface CourseStore {
+	/** Persist a new course (id, timestamps assigned here). */
+	createCourse(input: Omit<Course, "id" | "createdAt" | "updatedAt">): Course;
+	/** The course, or null if unknown id / corrupt file. */
+	getCourse(id: string): Course | null;
+	/** All courses, most recently updated first. */
+	listCourses(): Course[];
+	/** Replace title and lessons (the learner's syllabus edits); bumps updatedAt. */
+	saveCourse(id: string, patch: Pick<Course, "title" | "lessons">): Course;
+	/** Delete the course file. False when the id is unknown. Its lesson
+	 *  sessions are the caller's concern (they are kept — open point 3). */
+	deleteCourse(id: string): boolean;
+}

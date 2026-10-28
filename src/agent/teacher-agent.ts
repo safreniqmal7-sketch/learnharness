@@ -72,13 +72,23 @@ export type AgentKind = "prober" | "teacher" | "practice";
  *  tests/prompt-overrides.test.ts). Overrides are a static-file read
  *  through config paths, not request state — the store import carries no
  *  chat/job machinery. */
-export function composeInstructions(kind: AgentKind, switches?: Record<string, boolean>): string {
+export function composeInstructions(kind: AgentKind, switches?: Record<string, boolean>, lessonBlock?: string): string {
 	const segments = effectivePromptSegments(kind, switches ?? {});
-	return segments
+	// LESSON SESSIONS (course mode): the course/ fragments compose after the
+	// teacher's own fragments and BEFORE the shared appendix (the course
+	// refines teacher doctrine), then the per-turn lesson block closes the
+	// prompt. Ordinary sessions skip all of it — byte-identical output.
+	const lesson = kind === "teacher" && lessonBlock !== undefined;
+	if (lesson) {
+		const sharedAt = segments.findIndex((s) => s.path.startsWith("shared/"));
+		segments.splice(sharedAt === -1 ? segments.length : sharedAt, 0, ...effectivePromptSegments("course", switches ?? {}));
+	}
+	const composed = segments
 		.map((s) => (s.enabled ? s.overrideText! : s.sourceText))
 		.map((t) => t.trim())
 		.filter(Boolean)
 		.join("\n\n---\n\n");
+	return lesson ? `${composed}\n\n---\n\n${lessonBlock.trim()}` : composed;
 }
 
 // The switch-free source composition, cached per kind (module-load once).
@@ -121,6 +131,11 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** Course mode: the lesson context block (prompt-segments lessonContextBlock),
+	 *  rebuilt by the handler every turn from the CURRENT course. Present ONLY
+	 *  for a teacher in a lesson session; it also switches on the course/
+	 *  prompt fragments. Absent = the ordinary prompt, byte-for-byte. */
+	lessonBlock?: string;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -181,9 +196,11 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper(kind);
-	const systemPrompt = opts.promptSwitches
-		? composeInstructions(kind, opts.promptSwitches)
-		: composedInstructions[kind]!;
+	const systemPrompt = opts.lessonBlock !== undefined
+		? composeInstructions(kind, opts.promptSwitches, opts.lessonBlock)
+		: opts.promptSwitches
+			? composeInstructions(kind, opts.promptSwitches)
+			: composedInstructions[kind]!;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).

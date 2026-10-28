@@ -11,6 +11,7 @@ import {
 	buildAnswer,
 	repairMathForDisplay,
 	normalizeQuizType,
+	questionTypeLabel,
 	CONFIDENCE_STOPS,
 	DEFAULT_CONFIDENCE_INDEX,
 	emptyDockSelection,
@@ -148,8 +149,8 @@ export function QuestionDock({
 					toolLabel={toolLabel}
 					label={
 						(canonical === "quiz" || canonical === "explain") &&
-						normalizeQuizType((parsed as { type?: unknown }).type) === "predict"
-							? "Prediction"
+						["predict", "transfer"].includes(normalizeQuizType((parsed as { type?: unknown }).type) ?? "")
+							? questionTypeLabel((parsed as { type?: unknown }).type)
 							: undefined
 					}
 				/>
@@ -571,9 +572,7 @@ function QuestionDockForm({
 						: toolName === "recall"
 							? "Recall"
 							: kind === "quiz"
-								? qd.questionType === "predict"
-									? "Prediction"
-									: "Check"
+								? questionTypeLabel(qd.questionType)
 									: kind === "explain"
 										? "Explain"
 											: "Question"}

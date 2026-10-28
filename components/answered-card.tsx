@@ -7,7 +7,7 @@ import { ThinkingBlock } from "@/components/thinking-block";
 import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
-import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core";
+import { answerForPresentation, parseAskInput, parseQuizInput, questionTypeLabel } from "@/src/core";
 
 /**
  * Static rendering of an answered question (tool part in `output-available`).
@@ -71,9 +71,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 					: answer.tool === "recall"
 						? "Recall"
 						: isQuiz
-								? answer.questionType === "predict"
-									? "Prediction"
-									: "Check"
+								? questionTypeLabel(answer.questionType)
 									: isExplain
 										? "Explain"
 											: "Question"}

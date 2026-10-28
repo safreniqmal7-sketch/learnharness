@@ -21,7 +21,7 @@ Hold the architecture along two orthogonal axes:
 
 **Static structure — the hexagon.** One pure core (`src/core`); everything else is an *adapter* (implements a core port or drives the core) or a *composition root* (the only code that wires adapters to core). Dependency arrows point **inward only** — toward purity, toward stability. Two barrels are the entire public API: `@/src/core` (browser-safe) and `@/src/server` (the server-side surface).
 
-**Runtime ownership — six systems.** Each persistent store has exactly one owning writer-system; systems talk only through named, idempotent protocols:
+**Runtime ownership — seven systems.** Each persistent store has exactly one owning writer-system; systems talk only through named, idempotent protocols:
 
 | System | Owns (sole writer) | Role |
 |---|---|---|
@@ -29,6 +29,7 @@ Hold the architecture along two orthogonal axes:
 | **Workbench** — background labor | `data/jobs/*.json` | job runner, researcher/demo-builder/visual-maker, steer delivery |
 | **Library** — world model | `data/graph/*` ledgers | extraction pipeline (sole graph writer), derivation, birth-session clusters |
 | **Practice** — problem sets | `data/practice/*.json` | partitioner→generator→grader pipeline, self-contained sets (§7) |
+| **Course** — syllabi | `data/courses/*.json` | course structure only (lesson progress is derived from lesson-session transcripts); the teacher's `course_add_lesson` writes through the injected port |
 | **Stage** — presentation shell | nothing server-side | components/, graph canvas, docks — pure consumer via `/api/*` |
 | **Machine room** — host | process + config | Electron main, standalone Next server, `config.ts`, data-dir seam, BYOK keys |
 
@@ -144,7 +145,7 @@ flowchart TB
 
 ### 2.2 Contracts — one file per domain
 
-`src/core/contracts.ts` is a barrel over seven domain files, each owned outright by its stream (schema changes in a domain you don't own go through the master session):
+`src/core/contracts.ts` is a barrel over eight domain files, each owned outright by its stream (schema changes in a domain you don't own go through the master session):
 
 - `contracts/plan.ts` — plan tree types + derived statuses (`derivePlanStatuses`)
 - `contracts/graph.ts` — graph domain: ledgers, findings/audit shapes, snapshot, birth-session clusters
@@ -153,14 +154,15 @@ flowchart TB
 - `contracts/probe.ts` — probe assessment + the shared zod schema
 - `contracts/models.ts` — client-safe model-catalog shapes
 - `contracts/practice.ts` — problem sets, reasoning chains, params, grade scores
+- `contracts/course.ts` — courses, lessons, the lesson link (`ChatRecord.lesson`), the completion confidence floor
 
 ---
 
 ## 3. Ports, adapters, and the composition roots
 
-Storage is **per-entity semantic ports**, never one generic interface: `ChatStore`, `GraphStore`, `JobStore`, `PracticeStore` (`src/core/ports.ts` — types only). The fs adapters (`src/store/{chats,graph,jobs,practice}.ts`) implement them and contain persistence and nothing else. One more adapter (`src/store/render-settings.ts`) is a portless free function re-exported through the server barrel — a deliberate pragmatic bypass, documented here so nobody mistakes it for the pattern.
+Storage is **per-entity semantic ports**, never one generic interface: `ChatStore`, `GraphStore`, `JobStore`, `PracticeStore`, `CourseStore` (`src/core/ports.ts` — types only). The fs adapters (`src/store/{chats,graph,jobs,practice,courses}.ts`) implement them and contain persistence and nothing else. One more adapter (`src/store/render-settings.ts`) is a portless free function re-exported through the server barrel — a deliberate pragmatic bypass, documented here so nobody mistakes it for the pattern.
 
-**Idioms.** Graph evidence lives in **append-only JSONL ledgers** (corrupt-line-tolerant reads; strict shape guards drop invalid lines, never guess). Chats, jobs, positions, sources, and the settings blobs are whole-file read-modify-write JSON. All writes are synchronous, single-process (atomicity rides the Node event loop). Merge/dedup/derivation semantics are **reader-side, in core** — the store never decides.
+**Idioms.** Graph evidence lives in **append-only JSONL ledgers** (corrupt-line-tolerant reads; strict shape guards drop invalid lines, never guess). Chats, jobs, courses, positions, sources, and the settings blobs are whole-file read-modify-write JSON. All writes are synchronous, single-process (atomicity rides the Node event loop). Merge/dedup/derivation semantics are **reader-side, in core** — the store never decides.
 
 - **`src/server/stores.ts` is THE composition root for storage**: it instantiates the adapters and hands the port objects to everything else (chat-handler, job runner, extraction pipeline, practice pipeline, graph/positions/chats routes, turn services). It is the single place a storage decision (JSON vs SQLite, local vs remote) gets re-made.
 - **`src/server/chat-handler.ts` is THE composition root for a turn**: it wires the stores, the job runner, the extraction pipeline, the practice pipeline, and the pi engine into the stream response (`setTurnRunner`/`setJobRespawn` register its seams for the wake pipeline). All logic lives behind the seams it calls.
@@ -181,7 +183,7 @@ flowchart LR
         direction TB
         SESS["session brain: phases · plan-tree · question-core · pending · steer builders"]
         GBRAIN["graph brain: merger + derivation · coverage · clusters · layout"]
-        PORTSBOX["PORTS (types only): ChatStore · GraphStore · JobStore · PracticeStore"]
+        PORTSBOX["PORTS (types only): ChatStore · GraphStore · JobStore · PracticeStore · CourseStore"]
     end
 
     subgraph DRIVEN["DRIVEN ADAPTERS — outbound"]

@@ -46,6 +46,7 @@ import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.t
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, danglingQuestionOf } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
+import { lessonContextBlock } from "../agent/prompt-segments.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
@@ -388,6 +389,18 @@ export async function handleChatInput(
 	// Both share this whole composition (write-ahead persist, liveness,
 	// steers, usage, extraction) — only the agent differs.
 	const teaching = hasProbeDone(agentMessages);
+	// COURSE MODE: a teaching session whose record links a lesson of a course
+	// that still exists (and still lists that lesson) is a LESSON SESSION —
+	// the teacher gets the course prompt fragments, a lesson block rebuilt
+	// from the CURRENT course every turn (it may have grown mid-session),
+	// and the two course tools. No link, a deleted course, a removed lesson,
+	// a practice session, or the prober phase: an ordinary session.
+	const lessonLink = teaching && record.kind !== "practice" ? record.lesson : undefined;
+	const lessonCourse = lessonLink ? stores.courseStore.getCourse(lessonLink.courseId) : null;
+	const lessonEntry = lessonCourse?.lessons.find((l) => l.id === lessonLink?.lessonId);
+	const lessonSession = lessonLink && lessonCourse && lessonEntry
+		? { link: lessonLink, block: lessonContextBlock(lessonCourse, lessonEntry) }
+		: null;
 	// BYOK (owner, 2026-09-22): the conversation chain was resolved by the
 	// turn gate above (chat.model override → strong slot → refused) — the
 	// engine build is pure from here; thinking levels clamp natively.
@@ -432,6 +445,7 @@ export async function handleChatInput(
 		// point as the tool delta — the agent layer composes the system
 		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
+		...(lessonSession ? { lessonBlock: lessonSession.block } : {}),
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher
@@ -474,6 +488,7 @@ export async function handleChatInput(
 						// The registry drop's signal (2026-09-20): no live engine
 						// = no research tool in the teacher's registry.
 						searchAvailable,
+						...(lessonSession ? { lesson: { link: lessonSession.link, courseStore: stores.courseStore } } : {}),
 					},
 					agentOpts,
 				)

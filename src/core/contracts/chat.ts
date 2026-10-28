@@ -10,6 +10,7 @@ import type { LhMessage } from "../native-messages.ts";
 import type { Phase3 } from "../phases.ts";
 import type { PlanNodeStatus, PlanTree } from "./plan.ts";
 import type { EmissionStats } from "./graph.ts";
+import type { LessonLink } from "./course.ts";
 
 // ─── Chat records (the session store's on-disk format) ───────────────────────
 
@@ -35,6 +36,10 @@ export interface ChatRecord {
 	messages: LhMessage[];
 	/** The session's kind — absent = teach (pre-practice records). */
 	kind?: ChatKind;
+	/** Course mode (owner 2026-10-26): the lesson this session teaches —
+	 *  stamped once at creation, absent on ordinary sessions. The ONLY copy
+	 *  of the lesson↔session link (contracts/course.ts). */
+	lesson?: LessonLink;
 	/** The session's plan tree (vision §2) — written by plan tools via saveTree. */
 	tree?: PlanTree;
 	/** Append-only usage log (observability, 2026-09): one entry per model
@@ -271,6 +276,8 @@ export interface ChatSummary {
 	/** Practice sessions (2026-10-04): a posed problem with no conclude —
 	 *  the sidebar meta's "Problem waiting". Absent on teaching sessions. */
 	pendingProblem: boolean;
+	/** Course mode: the record's lesson link, verbatim (absent = ordinary). */
+	lesson?: LessonLink;
 	/** The record's model-control settings — rides the list payload via the
 	 *  summary spread (the picker never needs it from here; the full record
 	 *  is its source). */
