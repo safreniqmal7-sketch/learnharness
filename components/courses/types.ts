@@ -11,7 +11,14 @@ export interface CourseSummaryDto {
 	continueLessonId: string | null;
 }
 
-export type LessonViewDto = Lesson & { status: LessonStatus; chatId: string | null };
+export type LessonViewDto = Lesson & { status: LessonStatus; chatId: string | null; costDollars?: number };
+
+export interface CourseCostDto {
+	lessonsDollars: number;
+	draftDollars: number;
+	totalDollars: number;
+	unpriced: boolean;
+}
 
 export interface CourseViewDto {
 	course: { id: string; title: string; topic: string };
@@ -19,6 +26,7 @@ export interface CourseViewDto {
 	continueLessonId: string | null;
 	progress: { completed: number; total: number };
 	calibration?: CalibrationSummary;
+	cost?: CourseCostDto;
 }
 
 export const STATUS_LABEL: Record<LessonStatus, string> = {

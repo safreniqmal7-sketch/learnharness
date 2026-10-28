@@ -9,5 +9,5 @@ export async function POST(req: Request) {
 	if (!intake.ok) return Response.json({ error: intake.error }, { status: 400 });
 	const outcome = await draftCourseFor(topic, intake.value);
 	if (!outcome.ok) return Response.json(outcome.body, { status: outcome.status });
-	return Response.json({ draft: outcome.draft });
+	return Response.json({ draft: outcome.draft, usage: outcome.usage });
 }

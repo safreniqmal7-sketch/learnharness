@@ -224,6 +224,7 @@ export function NewCourse() {
 	const [lessons, setLessons] = useState<EditableLesson[]>([]);
 	const [busy, setBusy] = useState(false);
 	const [failure, setFailure] = useState<CourseFailure | null>(null);
+	const [draftUsage, setDraftUsage] = useState<unknown>(null);
 
 	const draft = async () => {
 		setBusy(true);
@@ -238,7 +239,8 @@ export function NewCourse() {
 				setFailure(await errorOf(res));
 				return;
 			}
-			const { draft: d } = (await res.json()) as { draft: CourseDraft };
+			const { draft: d, usage } = (await res.json()) as { draft: CourseDraft; usage?: unknown };
+			setDraftUsage(usage ?? null); // a redraft replaces the previous usage
 			setTitle(d.title);
 			setLessons(d.lessons.map((l) => ({ key: nextKey(), title: l.title, goal: l.goal })));
 			setStep("draft");
@@ -260,6 +262,7 @@ export function NewCourse() {
 					topic: values.topic.trim(),
 					title: title.trim(),
 					intake: intakeOf(values),
+					...(draftUsage ? { draftUsage } : {}),
 					lessons: lessons.map((l) => ({
 						title: l.title.trim(),
 						goal: l.goal.trim(),

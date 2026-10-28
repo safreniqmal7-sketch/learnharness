@@ -1,4 +1,4 @@
-import { createCourseFromDraft, listCourseViews, nonEmptyTrimmed, parseIntake, parseLessons } from "@/src/server";
+import { createCourseFromDraft, listCourseViews, nonEmptyTrimmed, parseDraftUsage, parseIntake, parseLessons } from "@/src/server";
 
 export async function GET() {
 	return Response.json({ courses: listCourseViews() });
@@ -15,8 +15,16 @@ export async function POST(req: Request) {
 	if (!intake.ok) return Response.json({ error: intake.error }, { status: 400 });
 	const lessons = parseLessons(body?.lessons);
 	if (!lessons.ok) return Response.json({ error: lessons.error }, { status: 400 });
+	const draftUsage = parseDraftUsage(body?.draftUsage);
+	if (!draftUsage.ok) return Response.json({ error: draftUsage.error }, { status: 400 });
 	try {
-		const course = createCourseFromDraft({ topic, intake: intake.value, title, lessons: lessons.value });
+		const course = createCourseFromDraft({
+			topic,
+			intake: intake.value,
+			title,
+			lessons: lessons.value,
+			...(draftUsage.value ? { draftUsage: draftUsage.value } : {}),
+		});
 		return Response.json({ course }, { status: 201 });
 	} catch (err) {
 		return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });

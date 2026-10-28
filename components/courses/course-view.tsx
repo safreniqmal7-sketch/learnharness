@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatUsd } from "@/components/usage-format";
 import { Input } from "@/components/ui/input";
 import type { LessonStatus } from "@/src/core";
 import { CalibrationPanel } from "./calibration-panel";
@@ -26,6 +27,11 @@ function StatusTag({ status }: { status: LessonStatus }) {
 	);
 }
 
+/** Dollars like the stats bar (formatUsd); an all-unpriced $0 reads "—", never a fake $0. */
+function costText(dollars: number, unpriced: boolean): string {
+	return unpriced && dollars === 0 ? "—" : formatUsd(dollars);
+}
+
 /** Read mode: the progress line, Continue, and the lessons in order. */
 export function CourseBody({
 	view,
@@ -43,6 +49,15 @@ export function CourseBody({
 				<span data-testid="course-progress" className="text-xs text-muted-foreground">
 					{view.course.topic} · {progressText(view.progress)}
 				</span>
+				{view.cost && (
+					<span
+						data-testid="course-cost"
+						title={`Lessons ${costText(view.cost.lessonsDollars, view.cost.unpriced)} · Syllabus drafting ${costText(view.cost.draftDollars, view.cost.unpriced)}`}
+						className="text-xs tabular-nums text-muted-foreground"
+					>
+						Spent {costText(view.cost.totalDollars, view.cost.unpriced)}
+					</span>
+				)}
 				<div className="min-w-4 flex-1" aria-hidden="true" />
 				{next && (
 					<Button size="sm" disabled={busyLessonId !== null} onClick={() => onStart(next)}>
@@ -74,6 +89,11 @@ export function CourseBody({
 									</span>
 								)}
 							</span>
+							{l.chatId !== null && l.costDollars !== undefined && (
+								<span data-testid="lesson-cost" className="shrink-0 text-xs tabular-nums text-muted-foreground">
+									{formatUsd(l.costDollars)}
+								</span>
+							)}
 							<StatusTag status={l.status} />
 						</button>
 					</li>

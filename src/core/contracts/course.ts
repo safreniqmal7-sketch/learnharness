@@ -9,6 +9,8 @@
  * on the chat record alone (ChatRecord.lesson), so it can never drift.
  */
 
+import type { CallUsage } from "./chat.ts";
+
 /** Who put a lesson in the syllabus: the drafter, the teacher mid-lesson
  *  (a missing foundation, owner decision 4), or the learner's own edit. */
 export type LessonOrigin = "syllabus" | "teacher" | "learner";
@@ -49,6 +51,10 @@ export interface Course {
 	lessons: Lesson[];
 	createdAt: string;
 	updatedAt: string;
+	/** The syllabus drafter's model usage, saved with the course on Save
+	 *  (tokens only — dollars are computed on read, like ChatRecord.turns).
+	 *  Absent on older courses and courses created without a draft. */
+	draftUsage?: { model: string; steps: CallUsage[] };
 }
 
 /** The chat record's link to its lesson (one lesson = one session, owner

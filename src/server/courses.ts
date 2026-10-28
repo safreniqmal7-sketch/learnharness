@@ -1,12 +1,16 @@
 import { draftCourse } from "../agent/course-drafter.ts";
 import { piEngineForSpec } from "../agent/models.ts";
+import type { CallUsage } from "../core/contracts.ts";
 import type { Course, CourseDraft, CourseIntake, Lesson, LessonStatus } from "../core/contracts/course.ts";
 import { calibrationSummary, type CalibrationChatInput, type CalibrationSummary } from "../core/calibration.ts";
 import { continueLessonId, courseProgress, lessonIdFor, lessonStatus } from "../core/courses.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import { modelsNotConfigured, providerKeyMissing } from "../core/settings.ts";
 import type { ModelsNotConfigured, ProviderKeyMissing } from "../core/settings.ts";
+import { graphCostSummary } from "../core/cost-summary.ts";
+import { isSubscriptionModel, turnCost } from "../core/prices.ts";
 import { providerKeyPresent } from "./keys.ts";
+import { callCost, sessionCost } from "./pricing.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 
 /**
@@ -16,7 +20,21 @@ import { effectiveSettings, stores } from "./stores.ts";
  * linked chat's transcript (core/courses.ts) — nothing here is stored twice.
  */
 
-export type LessonView = Lesson & { status: LessonStatus; chatId: string | null };
+export type LessonView = Lesson & {
+	status: LessonStatus;
+	chatId: string | null;
+	/** Detail views only: the lesson session's cost + its extraction runs
+	 *  (0 without a session). */
+	costDollars?: number;
+};
+
+/** Detail views only. Unpriced models count $0 and set `unpriced`. */
+export interface CourseCost {
+	lessonsDollars: number;
+	draftDollars: number;
+	totalDollars: number;
+	unpriced: boolean;
+}
 
 export interface CourseView {
 	course: Course;
@@ -25,6 +43,8 @@ export interface CourseView {
 	progress: { completed: number; total: number };
 	/** Present only on courseView / saveCourseEdits (not the list). */
 	calibration?: CalibrationSummary;
+	/** Present only on courseView / saveCourseEdits (not the list). */
+	cost?: CourseCost;
 }
 
 export interface CourseSummary {
@@ -48,30 +68,56 @@ function lessonChatIds(courseId: string): Map<string, string> {
 	return new Map([...oldest].map(([lessonId, v]) => [lessonId, v.id]));
 }
 
-function viewOf(course: Course, opts: { withCalibration?: boolean } = {}): CourseView {
+function viewOf(course: Course, opts: { withCalibration?: boolean; withCost?: boolean } = {}): CourseView {
 	const chatIds = lessonChatIds(course.id);
 	const statuses: Record<string, LessonStatus> = {};
 	const calChats: CalibrationChatInput[] = [];
+	let lessonsDollars = 0;
+	let unpriced = false;
 	const lessons = course.lessons.map((l): LessonView => {
 		const chatId = chatIds.get(l.id) ?? null;
 		const chat = chatId ? stores.chatStore.getChat(chatId) : null;
 		const status = lessonStatus(chat);
 		if (chat) calChats.push({ lessonTitle: l.title, tree: chat.tree, messages: chat.messages });
 		statuses[l.id] = status;
-		return { ...l, status, chatId };
+		if (!opts.withCost) return { ...l, status, chatId };
+		let costDollars = 0;
+		if (chat) {
+			const session = sessionCost(chat);
+			const extraction = graphCostSummary(
+				{ chats: [{ title: chat.title ?? chat.id, extractions: chat.extractions ?? [] }], sources: [] },
+				callCost,
+			);
+			costDollars = session.cost + extraction.totalDollars;
+			if (session.unpriced > 0 || extraction.unpricedRuns > 0) unpriced = true;
+		}
+		lessonsDollars += costDollars;
+		return { ...l, status, chatId, costDollars };
 	});
+	let cost: CourseCost | undefined;
+	if (opts.withCost) {
+		let draftDollars = 0;
+		const du = course.draftUsage;
+		if (du) {
+			const d = turnCost(du, callCost);
+			if (d !== null) draftDollars = d;
+			else if (!isSubscriptionModel(du.model) && du.steps.length > 0) unpriced = true;
+		}
+		cost = { lessonsDollars, draftDollars, totalDollars: lessonsDollars + draftDollars, unpriced };
+	}
 	return {
 		course,
 		lessons,
 		continueLessonId: continueLessonId(course, statuses),
 		progress: courseProgress(course, statuses),
 		...(opts.withCalibration ? { calibration: calibrationSummary({ chats: calChats }) } : {}),
+		...(cost ? { cost } : {}),
 	};
 }
 
 export function courseView(id: string): CourseView | null {
 	const course = stores.courseStore.getCourse(id);
-	return course ? viewOf(course, { withCalibration: true }) : null;
+	return course ? viewOf(course, { withCalibration: true, withCost: true }) : null;
 }
 
 export function listCourseViews(): CourseSummary[] {
@@ -88,8 +134,10 @@ export function listCourseViews(): CourseSummary[] {
 	});
 }
 
+export type DraftUsage = { model: string; steps: CallUsage[] };
+
 export type DraftOutcome =
-	| { ok: true; draft: CourseDraft }
+	| { ok: true; draft: CourseDraft; usage: DraftUsage }
 	| { ok: false; status: 503; body: ModelsNotConfigured | ProviderKeyMissing }
 	| { ok: false; status: 502; body: { error: string } };
 
@@ -102,8 +150,25 @@ export async function draftCourseFor(topic: string, intake: CourseIntake): Promi
 		return { ok: false, status: 503, body: providerKeyMissing(spec.provider, ["strong"]) };
 	}
 	try {
-		const draft = await draftCourse({ topic, intake }, { engine: piEngineForSpec(spec, false) });
-		return { ok: true, draft };
+		// Money channel: one step per model call (a retry is a second step),
+		// mapped exactly like chat-handler's collectUsage.
+		const steps: CallUsage[] = [];
+		const draft = await draftCourse(
+			{ topic, intake },
+			{
+				engine: piEngineForSpec(spec, false),
+				onUsage: (usage) =>
+					steps.push({
+						inputTokens: usage.input,
+						outputTokens: usage.output,
+						cacheReadTokens: usage.cacheRead,
+						cacheWriteTokens: usage.cacheWrite,
+						cacheWrite1hTokens: usage.cacheWrite1h ?? 0,
+						reasoningTokens: usage.reasoning ?? 0,
+					}),
+			},
+		);
+		return { ok: true, draft, usage: { model: `${spec.provider}:${spec.id}`, steps } };
 	} catch (err) {
 		return { ok: false, status: 502, body: { error: err instanceof Error ? err.message : String(err) } };
 	}
@@ -114,6 +179,7 @@ export function createCourseFromDraft(input: {
 	intake: CourseIntake;
 	title: string;
 	lessons: Array<{ title: string; goal: string; learnerAdded?: boolean }>;
+	draftUsage?: DraftUsage;
 }): Course {
 	const ids: string[] = [];
 	const lessons = input.lessons.map((l): Lesson => {
@@ -121,7 +187,13 @@ export function createCourseFromDraft(input: {
 		ids.push(id);
 		return { id, title: l.title, goal: l.goal, origin: l.learnerAdded ? "learner" : "syllabus" };
 	});
-	return stores.courseStore.createCourse({ title: input.title, topic: input.topic, intake: input.intake, lessons });
+	return stores.courseStore.createCourse({
+		title: input.title,
+		topic: input.topic,
+		intake: input.intake,
+		lessons,
+		...(input.draftUsage ? { draftUsage: input.draftUsage } : {}),
+	});
 }
 
 /** Save the learner's syllabus edits. Known ids keep origin + addedReason;
@@ -152,7 +224,7 @@ export function saveCourseEdits(
 		taken.add(newId);
 		return { id: newId, title: l.title, goal: l.goal, origin: "learner" };
 	});
-	return viewOf(stores.courseStore.saveCourse(id, { title: input.title, lessons }), { withCalibration: true });
+	return viewOf(stores.courseStore.saveCourse(id, { title: input.title, lessons }), { withCalibration: true, withCost: true });
 }
 
 /** Delete the course; its sessions remain (their link just dangles). */
@@ -227,6 +299,45 @@ export function parseLessons(raw: unknown): Parsed<Array<{ id?: string; title: s
 		});
 	}
 	return { ok: true, value: out };
+}
+
+const STEP_FIELDS = ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "cacheWrite1hTokens", "reasoningTokens"] as const;
+
+/** Optional `draftUsage`: { model: string, steps: [{ token counts }] }.
+ *  Absent/null -> ok with no value; present token fields must be finite,
+ *  non-negative numbers. Unknown step fields are dropped. */
+export function parseDraftUsage(raw: unknown): Parsed<DraftUsage | undefined> {
+	if (raw === undefined || raw === null) return { ok: true, value: undefined };
+	if (typeof raw !== "object" || Array.isArray(raw)) return { ok: false, error: "draftUsage must be an object" };
+	const o = raw as Record<string, unknown>;
+	const model = str(o.model);
+	if (!model) return { ok: false, error: "draftUsage.model must be a non-empty string" };
+	if (!Array.isArray(o.steps)) return { ok: false, error: "draftUsage.steps must be an array" };
+	const steps: CallUsage[] = [];
+	for (const [i, item] of o.steps.entries()) {
+		if (typeof item !== "object" || item === null || Array.isArray(item)) {
+			return { ok: false, error: `draftUsage.steps[${i}] must be an object` };
+		}
+		const s = item as Record<string, unknown>;
+		const n: Record<string, number | undefined> = {};
+		for (const f of STEP_FIELDS) {
+			const v = s[f];
+			if (v === undefined) continue;
+			if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+				return { ok: false, error: `draftUsage.steps[${i}].${f} must be a finite non-negative number` };
+			}
+			n[f] = v;
+		}
+		steps.push({
+			inputTokens: n.inputTokens,
+			outputTokens: n.outputTokens,
+			cacheReadTokens: n.cacheReadTokens,
+			cacheWriteTokens: n.cacheWriteTokens,
+			reasoningTokens: n.reasoningTokens,
+			...(n.cacheWrite1hTokens !== undefined ? { cacheWrite1hTokens: n.cacheWrite1hTokens } : {}),
+		});
+	}
+	return { ok: true, value: { model, steps } };
 }
 
 export { str as nonEmptyTrimmed };
