@@ -6,6 +6,7 @@ import { CheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { LessonStatus } from "@/src/core";
+import { CalibrationPanel } from "./calibration-panel";
 import { CoursesFrame } from "./frame";
 import { addLesson, editorValid, moveLesson, nextKey, patchLesson, removeLesson, type EditableLesson } from "./lesson-edit";
 import { LessonEditor } from "./lesson-editor";
@@ -78,6 +79,7 @@ export function CourseBody({
 					</li>
 				))}
 			</ol>
+			{view.calibration && view.lessons.some((l) => l.chatId !== null) && <CalibrationPanel summary={view.calibration} />}
 		</div>
 	);
 }

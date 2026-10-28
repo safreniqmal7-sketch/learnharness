@@ -83,3 +83,4 @@ export * from "./session-markdown.ts";
 // courses.ts (course mode, 2026-10-26): lesson status / completion gate /
 // course progress, derived from transcripts. Pure, browser-safe.
 export * from "./courses.ts";
+export * from "./calibration.ts";

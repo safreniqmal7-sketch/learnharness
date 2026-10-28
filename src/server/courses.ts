@@ -1,6 +1,7 @@
 import { draftCourse } from "../agent/course-drafter.ts";
 import { piEngineForSpec } from "../agent/models.ts";
 import type { Course, CourseDraft, CourseIntake, Lesson, LessonStatus } from "../core/contracts/course.ts";
+import { calibrationSummary, type CalibrationChatInput, type CalibrationSummary } from "../core/calibration.ts";
 import { continueLessonId, courseProgress, lessonIdFor, lessonStatus } from "../core/courses.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import { modelsNotConfigured, providerKeyMissing } from "../core/settings.ts";
@@ -22,6 +23,8 @@ export interface CourseView {
 	lessons: LessonView[];
 	continueLessonId: string | null;
 	progress: { completed: number; total: number };
+	/** Present only on courseView / saveCourseEdits (not the list). */
+	calibration?: CalibrationSummary;
 }
 
 export interface CourseSummary {
@@ -45,12 +48,15 @@ function lessonChatIds(courseId: string): Map<string, string> {
 	return new Map([...oldest].map(([lessonId, v]) => [lessonId, v.id]));
 }
 
-function viewOf(course: Course): CourseView {
+function viewOf(course: Course, opts: { withCalibration?: boolean } = {}): CourseView {
 	const chatIds = lessonChatIds(course.id);
 	const statuses: Record<string, LessonStatus> = {};
+	const calChats: CalibrationChatInput[] = [];
 	const lessons = course.lessons.map((l): LessonView => {
 		const chatId = chatIds.get(l.id) ?? null;
-		const status = lessonStatus(chatId ? stores.chatStore.getChat(chatId) : null);
+		const chat = chatId ? stores.chatStore.getChat(chatId) : null;
+		const status = lessonStatus(chat);
+		if (chat) calChats.push({ lessonTitle: l.title, tree: chat.tree, messages: chat.messages });
 		statuses[l.id] = status;
 		return { ...l, status, chatId };
 	});
@@ -59,12 +65,13 @@ function viewOf(course: Course): CourseView {
 		lessons,
 		continueLessonId: continueLessonId(course, statuses),
 		progress: courseProgress(course, statuses),
+		...(opts.withCalibration ? { calibration: calibrationSummary({ chats: calChats }) } : {}),
 	};
 }
 
 export function courseView(id: string): CourseView | null {
 	const course = stores.courseStore.getCourse(id);
-	return course ? viewOf(course) : null;
+	return course ? viewOf(course, { withCalibration: true }) : null;
 }
 
 export function listCourseViews(): CourseSummary[] {
@@ -145,7 +152,7 @@ export function saveCourseEdits(
 		taken.add(newId);
 		return { id: newId, title: l.title, goal: l.goal, origin: "learner" };
 	});
-	return viewOf(stores.courseStore.saveCourse(id, { title: input.title, lessons }));
+	return viewOf(stores.courseStore.saveCourse(id, { title: input.title, lessons }), { withCalibration: true });
 }
 
 /** Delete the course; its sessions remain (their link just dangles). */
