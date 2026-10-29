@@ -36,7 +36,11 @@ Written 2026-10-29 at the end of the course-mode / calibration / costs session. 
 
 Process for each item, from the repo's AGENTS.md: investigate → ask design questions one at a time → write a plan → owner approves → then code. Coding is delegated to Sonnet/Haiku subagents; the orchestrator does the contracts, prompt wording, review and browser checks.
 
-### 1. Spaced review (biggest learning impact)
+### 1. Spaced review — BUILT 2026-10-29 (branch `feature/spaced-review`)
+
+Plan and decisions: `docs/spaced-review.md`. Not yet seen live: the Review panel appears on a course page only after a lesson is complete, and the first review is due a day later. Check then: the panel, Start review, the "Review: <course>" session, and the ladder moving after a solve.
+
+The original notes, kept for reference:
 
 - **Goal:** short reviews of earlier lessons at growing intervals, on the course page.
 - **Facts found:**

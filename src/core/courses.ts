@@ -153,6 +153,13 @@ export function lessonCompleted(messages: readonly LhMessage[]): boolean {
 	return messages.some((m) => m.role === "toolResult" && m.toolName === LESSON_COMPLETE_TOOL && m.isError !== true);
 }
 
+/** Epoch ms of the FIRST accepted lesson_complete result (the course clock
+ *  for spaced review); null when the lesson was never completed. */
+export function lessonCompletedAt(messages: readonly LhMessage[]): number | null {
+	const m = messages.find((x) => x.role === "toolResult" && x.toolName === LESSON_COMPLETE_TOOL && x.isError !== true);
+	return m ? m.timestamp : null;
+}
+
 /** A lesson's status from its session's chat (null = no session yet). */
 export function lessonStatus(chat: { messages: readonly LhMessage[] } | null): LessonStatus {
 	if (!chat) return "not-started";

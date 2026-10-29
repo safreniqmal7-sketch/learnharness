@@ -1,4 +1,4 @@
-import type { CalibrationSummary, Lesson, LessonStatus } from "@/src/core";
+import type { CalibrationSummary, Lesson, LessonStatus, ReviewSchedule } from "@/src/core";
 
 /** Client-side shapes of the /api/courses payloads (mirrors src/server/courses.ts;
  *  components may not import the server layer, so the wire shapes live here). */
@@ -26,6 +26,7 @@ export interface CourseViewDto {
 	continueLessonId: string | null;
 	progress: { completed: number; total: number };
 	calibration?: CalibrationSummary;
+	review?: ReviewSchedule;
 	cost?: CourseCostDto;
 }
 

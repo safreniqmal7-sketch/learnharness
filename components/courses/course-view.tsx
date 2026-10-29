@@ -11,6 +11,7 @@ import { CalibrationPanel } from "./calibration-panel";
 import { CoursesFrame } from "./frame";
 import { addLesson, editorValid, moveLesson, nextKey, patchLesson, removeLesson, type EditableLesson } from "./lesson-edit";
 import { LessonEditor } from "./lesson-editor";
+import { ReviewPanel } from "./review-panel";
 import { startLesson } from "./start-lesson";
 import { progressText, STATUS_LABEL, type CourseViewDto, type LessonViewDto } from "./types";
 
@@ -99,6 +100,9 @@ export function CourseBody({
 					</li>
 				))}
 			</ol>
+			{view.review && view.lessons.some((l) => l.status === "complete") && (
+				<ReviewPanel review={view.review} courseTitle={view.course.title} />
+			)}
 			{view.calibration && view.lessons.some((l) => l.chatId !== null) && <CalibrationPanel summary={view.calibration} />}
 		</div>
 	);

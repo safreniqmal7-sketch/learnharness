@@ -85,3 +85,4 @@ export * from "./session-markdown.ts";
 // course progress, derived from transcripts. Pure, browser-safe.
 export * from "./courses.ts";
 export * from "./calibration.ts";
+export * from "./review.ts";

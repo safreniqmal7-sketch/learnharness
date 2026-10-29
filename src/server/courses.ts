@@ -3,7 +3,8 @@ import { piEngineForSpec } from "../agent/models.ts";
 import type { CallUsage } from "../core/contracts.ts";
 import type { Course, CourseDraft, CourseIntake, Lesson, LessonStatus } from "../core/contracts/course.ts";
 import { calibrationSummary, type CalibrationChatInput, type CalibrationSummary } from "../core/calibration.ts";
-import { continueLessonId, courseProgress, lessonIdFor, lessonStatus } from "../core/courses.ts";
+import { continueLessonId, courseProgress, lessonCompletedAt, lessonIdFor, lessonStatus } from "../core/courses.ts";
+import { reviewSchedule, type ReviewLessonInput, type ReviewSchedule } from "../core/review.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import { modelsNotConfigured, providerKeyMissing } from "../core/settings.ts";
 import type { ModelsNotConfigured, ProviderKeyMissing } from "../core/settings.ts";
@@ -44,6 +45,8 @@ export interface CourseView {
 	/** Present only on courseView / saveCourseEdits (not the list). */
 	calibration?: CalibrationSummary;
 	/** Present only on courseView / saveCourseEdits (not the list). */
+	review?: ReviewSchedule;
+	/** Present only on courseView / saveCourseEdits (not the list). */
 	cost?: CourseCost;
 }
 
@@ -68,10 +71,11 @@ function lessonChatIds(courseId: string): Map<string, string> {
 	return new Map([...oldest].map(([lessonId, v]) => [lessonId, v.id]));
 }
 
-function viewOf(course: Course, opts: { withCalibration?: boolean; withCost?: boolean } = {}): CourseView {
+function viewOf(course: Course, opts: { withCalibration?: boolean; withReview?: boolean; withCost?: boolean } = {}): CourseView {
 	const chatIds = lessonChatIds(course.id);
 	const statuses: Record<string, LessonStatus> = {};
 	const calChats: CalibrationChatInput[] = [];
+	const reviewLessons: ReviewLessonInput[] = [];
 	let lessonsDollars = 0;
 	let unpriced = false;
 	const lessons = course.lessons.map((l): LessonView => {
@@ -79,6 +83,10 @@ function viewOf(course: Course, opts: { withCalibration?: boolean; withCost?: bo
 		const chat = chatId ? stores.chatStore.getChat(chatId) : null;
 		const status = lessonStatus(chat);
 		if (chat) calChats.push({ lessonTitle: l.title, tree: chat.tree, messages: chat.messages });
+		if (chat && chatId) {
+			const completedAt = lessonCompletedAt(chat.messages);
+			if (completedAt !== null) reviewLessons.push({ lessonId: l.id, title: l.title, chatId, completedAt });
+		}
 		statuses[l.id] = status;
 		if (!opts.withCost) return { ...l, status, chatId };
 		let costDollars = 0;
@@ -105,19 +113,31 @@ function viewOf(course: Course, opts: { withCalibration?: boolean; withCost?: bo
 		}
 		cost = { lessonsDollars, draftDollars, totalDollars: lessonsDollars + draftDollars, unpriced };
 	}
+	let review: ReviewSchedule | undefined;
+	if (opts.withReview) {
+		const practiceChats = stores.chatStore
+			.listChats()
+			.filter((c) => c.kind === "practice")
+			.flatMap((c) => {
+				const chat = stores.chatStore.getChat(c.id);
+				return chat ? [{ messages: chat.messages }] : [];
+			});
+		review = reviewSchedule({ lessons: reviewLessons, nodes: stores.graphStore.readNodes(), practiceChats, now: Date.now() });
+	}
 	return {
 		course,
 		lessons,
 		continueLessonId: continueLessonId(course, statuses),
 		progress: courseProgress(course, statuses),
 		...(opts.withCalibration ? { calibration: calibrationSummary({ chats: calChats }) } : {}),
+		...(review ? { review } : {}),
 		...(cost ? { cost } : {}),
 	};
 }
 
 export function courseView(id: string): CourseView | null {
 	const course = stores.courseStore.getCourse(id);
-	return course ? viewOf(course, { withCalibration: true, withCost: true }) : null;
+	return course ? viewOf(course, { withCalibration: true, withReview: true, withCost: true }) : null;
 }
 
 export function listCourseViews(): CourseSummary[] {
@@ -224,7 +244,11 @@ export function saveCourseEdits(
 		taken.add(newId);
 		return { id: newId, title: l.title, goal: l.goal, origin: "learner" };
 	});
-	return viewOf(stores.courseStore.saveCourse(id, { title: input.title, lessons }), { withCalibration: true, withCost: true });
+	return viewOf(stores.courseStore.saveCourse(id, { title: input.title, lessons }), {
+		withCalibration: true,
+		withReview: true,
+		withCost: true,
+	});
 }
 
 /** Delete the course; its sessions remain (their link just dangles). */
