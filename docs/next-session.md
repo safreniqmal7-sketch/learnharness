@@ -5,7 +5,8 @@ Written 2026-10-29 at the end of the course-mode / calibration / costs session. 
 ## Where things stand
 
 - **Fork:** `safreniqmal7-sketch/learnharness`. `origin` is the fork; `upstream` is `amosblomqvist/learnharness`.
-- **`main`** is upstream **0.3.9** plus all our work (merge `77e245c`), pushed. The checkout is on `main`.
+- **`main`** is upstream **0.4.0** plus all our work (merge `3451739`, 2026-10-30), pushed. The checkout is on `main`. 0.4.0 adds an opt-in **Claude Code** provider (needs a native `claude.exe` ≥ 2.1.259 in `~/.local/bin` or PATH, signed in; billed by your Claude plan, shown unpriced), a custom OpenAI-compatible endpoint, file-path drop/chips, image resizing, and Next 16.4.3.
+- **Windows test baseline after 0.4.0:** 18 failures (13 old + 5 Claude Code tests whose fake CLI is a Unix script).
 - **Our features**, all live:
   - **Course mode:** a syllabus from a topic plus a short intake; one session per lesson; the teacher can add lessons.
   - **Completion gate:** a lesson completes only on app-checked evidence. Every goal node needs a correct multiple-choice check at 70%+ confidence, plus one passing **"New case"** transfer question.
@@ -26,6 +27,7 @@ Written 2026-10-29 at the end of the course-mode / calibration / costs session. 
 
 ## Not yet verified live (do these by using the app)
 
+- [x] Spaced review panel seen live 2026-10-30 ("Nothing due · next due in 1 day").
 - [ ] Finish a lesson. The teacher should be refused without a **"New case"** question, pose one, and the lesson should then show **Complete** on the course page.
 - [ ] Draft and save a new course. The course page should show a **syllabus drafting** cost.
 - [ ] After the next lesson's extraction, compare reasoning tokens per extraction run with ~4,600 (at high). Low should be much smaller.
