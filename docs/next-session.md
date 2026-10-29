@@ -19,9 +19,9 @@ Written 2026-10-29 at the end of the course-mode / calibration / costs session. 
 
 ## Loose ends (quick)
 
-1. **Smoke-test session.** "Smoke test: what is a price ceiling?" is in the sidebar, created by the merge check. Delete it if you don't want it.
-2. **Backup.** The pre-cleanup data backup is in the Claude scratchpad (`data-backup-202610290201`). It also holds the two sessions that disappeared on 2026-10-29 ("i want to learn about microeconomics", "Scarcity, Choice, and Opportunity Cost"). The scratchpad is temporary, so restore them now if you want them.
-3. **Settings prompt editor gap.** It doesn't list `course/10-lesson.md`; the API already accepts it. Small fix: add `course` to `app/api/settings/prompts/route.ts` and the editor list.
+1. ~~Smoke-test session~~: removed from `data/chats` 2026-10-29.
+2. ~~Backup~~: the two lost sessions ("i want to learn about microeconomics", "Scarcity, Choice, and Opportunity Cost") were restored to `data/chats` 2026-10-29.
+3. ~~Settings prompt editor gap~~: fixed. `course/10-lesson.md` now has its own "Course lessons" section after Teacher. Practice prompts (`practice/`) are still not listed in the editor; that gap came from upstream.
 4. **Upstream test leak.** Some upstream tests write chats into the real `data/`. Always run tests with a temporary `LH_DATA_DIR` (command below). Optionally report this upstream.
 
 ## Not yet verified live (do these by using the app)

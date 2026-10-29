@@ -369,6 +369,15 @@ describe("sectionedSegments — the prompts overhaul (2026-09-26)", () => {
 		assert.equal(teacher.hint, undefined);
 	});
 
+	it("course fragments get their own section after Teacher (owner, 2026-10-29)", () => {
+		const course = [{ path: "course/10-lesson.md", sourceText: "c1", overrideText: null, enabled: false, shared: false }];
+		const sections = sectionedSegments({ ...view, course });
+		assert.deepEqual(sections.map((s) => s.id), ["teacher", "course", "prober", "shared"]);
+		assert.deepEqual(sections[1]?.segments.map((s) => s.path), ["course/10-lesson.md"]);
+		assert.equal(sections[1]?.label, "Course lessons");
+		assert.equal(sections[1]?.hint, "Added to the teacher in lesson sessions");
+	});
+
 	it("the indicator copy is pinned — it states WHICH VERSION IS IN USE (refined 2026-09-26)", () => {
 		assert.equal(PROMPT_IN_USE_HINT, "Your version is in use");
 	});

@@ -37,7 +37,7 @@
  *
  * Prompts: GET /api/settings/prompts segments — THREE SECTIONS in the
  * owner's ruled order (2026-09-26 overhaul): Teacher first, Prober, then
- * Shared LAST. The server returns per-agent lists that each INCLUDE the
+ * Shared LAST — plus Course lessons right after Teacher (2026-10-29). The server returns per-agent lists that each INCLUDE the
  * shared segments; sectionedSegments deduplicates them (shared chunks
  * once, in prompt-assembly order). The row rulings: only the TOGGLE
  * grays when there's no override file (the file name is always
@@ -172,10 +172,18 @@ export function composeSearchEngine(
  *  this line). Exported for the pin. */
 export const PROMPT_IN_USE_HINT = "Your version is in use";
 
+/** The GET /api/settings/prompts body. `course` (lesson sessions) holds
+ *  only the course/ fragments; older servers and test mocks omit it. */
+export interface PromptView {
+	prober: SegmentInfo[];
+	teacher: SegmentInfo[];
+	course?: SegmentInfo[];
+}
+
 /** One section of the prompt view — the owner's ruled order: Teacher,
- *  Prober, then Shared last. */
+ *  Course lessons (owner, 2026-10-29), Prober, then Shared last. */
 export interface PromptSection {
-	id: "teacher" | "prober" | "shared";
+	id: "teacher" | "course" | "prober" | "shared";
 	label: string;
 	/** The one header that earns a hint: "Shared" alone is not
 	 *  self-evident. Teacher/Prober are. */
@@ -191,10 +199,14 @@ export interface PromptSection {
  *  agents' own chunks keep their lists' order — which IS the prompt
  *  assembly order (numeric-prefix filename sort). Pure — exported for
  *  tests. */
-export function sectionedSegments(view: { prober: SegmentInfo[]; teacher: SegmentInfo[] }): PromptSection[] {
+export function sectionedSegments(view: PromptView): PromptSection[] {
 	const own = (who: "prober" | "teacher") => view[who].filter((s) => !s.shared);
+	const course = view.course ?? [];
 	return [
 		{ id: "teacher", label: "Teacher", segments: own("teacher") },
+		...(course.length > 0
+			? [{ id: "course" as const, label: "Course lessons", hint: "Added to the teacher in lesson sessions", segments: course }]
+			: []),
 		{ id: "prober", label: "Prober", segments: own("prober") },
 		{
 			id: "shared",
@@ -300,7 +312,7 @@ export function AgentSection({
 	/** Which search engines have a key (/api/keys) — the no-keys-anywhere
 	 *  state grays the row; per-engine marks ride the menu rows. */
 	const [engineKeys, setEngineKeys] = useState<Partial<Record<(typeof SEARCH_ENGINES)[number], boolean>>>({});
-	const [prompts, setPrompts] = useState<{ prober: SegmentInfo[]; teacher: SegmentInfo[] } | null>(null);
+	const [prompts, setPrompts] = useState<PromptView | null>(null);
 	const [openSegment, setOpenSegment] = useState<string | null>(null);
 	const [segmentDraft, setSegmentDraft] = useState<Record<string, string>>({});
 	const [segmentStatus, setSegmentStatus] = useState<string | null>(null);
@@ -325,7 +337,7 @@ export function AgentSection({
 	const readPrompts = useCallback(() => {
 		fetch("/api/settings/prompts")
 			.then((r) => r.json())
-			.then((body: { prober: SegmentInfo[]; teacher: SegmentInfo[] }) => setPrompts(body))
+			.then((body: PromptView) => setPrompts(body))
 			.catch(() => {});
 	}, []);
 
@@ -342,7 +354,7 @@ export function AgentSection({
 	useEffect(() => {
 		fetch("/api/settings/prompts")
 			.then((r) => r.json())
-			.then((body: { prober: SegmentInfo[]; teacher: SegmentInfo[] }) => setPrompts(body))
+			.then((body: PromptView) => setPrompts(body))
 			.catch(() => setPrompts(null));
 		fetch("/api/keys")
 			.then((r) => r.json())
